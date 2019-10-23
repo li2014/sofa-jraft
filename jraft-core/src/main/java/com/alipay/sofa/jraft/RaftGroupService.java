@@ -113,9 +113,11 @@ public class RaftGroupService {
      * @param startRpcServer whether to start RPC server.
      */
     public synchronized Node start(final boolean startRpcServer) {
+        //如果已经启动了，那么就返回
         if (this.started) {
             return this.node;
         }
+        //
         if (this.serverId == null || this.serverId.getEndpoint() == null
             || this.serverId.getEndpoint().equals(new Endpoint(Utils.IP_ANY, 0))) {
             throw new IllegalArgumentException("Blank serverId:" + this.serverId);
@@ -124,10 +126,14 @@ public class RaftGroupService {
             throw new IllegalArgumentException("Blank group id" + this.groupId);
         }
         //Adds RPC server to Server.
+        //设置当前node的ip和端口 Endpoint添加到NodeManager的addrSet变量中
         NodeManager.getInstance().addAddress(this.serverId.getEndpoint());
-
+        //创建node createAndInitRaftNode方法首先调用createRaftNode实例化一个Node的实例NodeImpl，然后调用其init方法进行初始化，主要的配置都是在init方法中完成的。
         this.node = RaftServiceFactory.createAndInitRaftNode(this.groupId, this.serverId, this.nodeOptions);
+        //
         if (startRpcServer) {
+            //启动远程服务
+            //每个节点都会启动一个rpc的服务，因为每个节点既可以被选举也可以投票给其他节点，节点之间需要互相通信，所以需要启动一个rpc服务。
             this.rpcServer.start();
         } else {
             LOG.warn("RPC server is not started in RaftGroupService.");

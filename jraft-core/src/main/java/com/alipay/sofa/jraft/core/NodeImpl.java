@@ -450,13 +450,17 @@ public class NodeImpl implements Node, RaftServerService {
 
     public NodeImpl(final String groupId, final PeerId serverId) {
         super();
+        //检验groupId是否符合格式规范
         if (groupId != null) {
             Utils.verifyGroupId(groupId);
         }
         this.groupId = groupId;
         this.serverId = serverId != null ? serverId.copy() : null;
+        //一开始的设置为未初始化
         this.state = State.STATE_UNINITIALIZED;
+        //设置新的任期为0
         this.currTerm = 0;
+        //设置最新的时间戳
         updateLastLeaderTimestamp(Utils.monotonicMs());
         this.confCtx = new ConfigurationCtx(this);
         this.wakingCandidate = null;
@@ -684,9 +688,11 @@ public class NodeImpl implements Node, RaftServerService {
         Requires.requireNonNull(opts, "Null node options");
         Requires.requireNonNull(opts.getRaftOptions(), "Null raft options");
         Requires.requireNonNull(opts.getServiceFactory(), "Null jraft service factory");
+        //目前就一个实现：DefaultJRaftServiceFactory
         this.serviceFactory = opts.getServiceFactory();
         this.options = opts;
         this.raftOptions = opts.getRaftOptions();
+        //基于 Metrics 类库的性能指标统计，具有丰富的性能统计指标，默认不开启度量工具
         this.metrics = new NodeMetrics(opts.isEnableMetrics());
 
         if (this.serverId.getIp().equals(Utils.IP_ANY)) {
@@ -699,25 +705,41 @@ public class NodeImpl implements Node, RaftServerService {
             return false;
         }
 
+        //定时任务管理器
         this.timerManager = new TimerManager();
+        //初始化定时任务管理器的内置线程池
         if (!this.timerManager.init(this.options.getTimerPoolSize())) {
             LOG.error("Fail to init timer manager.");
             return false;
         }
 
+        /*
+        voteTimer是用来控制选举的，如果选举超时，当前的节点又是候选者角色，那么就会发起选举。
+        electionTimer是预投票计时器。候选者在发起投票之前，先发起预投票，如果没有得到半数以上节点的反馈，则候选者就会识趣的放弃参选。
+        stepDownTimer定时检查是否需要重新选举leader。当前的leader可能出现它的Follower可能并没有整个集群的1/2却还没有下台的情况，那么这个时候会定期的检查看leader的Follower是否有那么多，没有那么多的话会强制让leader下台。
+        snapshotTimer快照计时器。这个计时器会每隔1小时触发一次生成一个快照。
+         */
+        ////设置投票计时器
         // Init timers
         this.voteTimer = new RepeatedTimer("JRaft-VoteTimer", this.options.getElectionTimeoutMs()) {
 
             @Override
             protected void onTrigger() {
+                //处理投票超时
                 handleVoteTimeout();
             }
 
             @Override
             protected int adjustTimeout(final int timeoutMs) {
+                //在一定范围内返回一个随机的时间戳
                 return randomTimeout(timeoutMs);
             }
         };
+        //设置预投票计时器
+        //当leader在规定的一段时间内没有与 Follower 舰船进行通信时，
+        // Follower 就可以认为leader已经不能正常担任旗舰的职责，则 Follower 可以去尝试接替leader的角色。
+        // 这段通信超时被称为 Election Timeout
+        //候选者在发起投票之前，先发起预投票
         this.electionTimer = new RepeatedTimer("JRaft-ElectionTimer", this.options.getElectionTimeoutMs()) {
 
             @Override
@@ -727,9 +749,13 @@ public class NodeImpl implements Node, RaftServerService {
 
             @Override
             protected int adjustTimeout(final int timeoutMs) {
+                //在一定范围内返回一个随机的时间戳
+                //为了避免同时发起选举而导致失败
                 return randomTimeout(timeoutMs);
             }
         };
+        //leader下台的计时器
+        //定时检查是否需要重新选举leader
         this.stepDownTimer = new RepeatedTimer("JRaft-StepDownTimer", this.options.getElectionTimeoutMs() >> 1) {
 
             @Override
@@ -737,6 +763,7 @@ public class NodeImpl implements Node, RaftServerService {
                 handleStepDownTimeout();
             }
         };
+        //快照计时器
         this.snapshotTimer = new RepeatedTimer("JRaft-SnapshotTimer", this.options.getSnapshotIntervalSecs() * 1000) {
 
             @Override
@@ -747,6 +774,9 @@ public class NodeImpl implements Node, RaftServerService {
 
         this.configManager = new ConfigurationManager();
 
+
+        //这里初始化了一个Disruptor作为消费队列，不清楚Disruptor的朋友可以去看我上一篇文章：Disruptor https://www.cnblogs.com/luozhiyun/p/11631305.html—核心概念及体验。
+        //初始化一个disruptor，采用多生产者模式
         this.applyDisruptor = DisruptorBuilder.<LogEntryAndClosure> newInstance() //
             .setRingBufferSize(this.raftOptions.getDisruptorBufferSize()) //
             .setEventFactory(new LogEntryAndClosureFactory()) //
@@ -754,36 +784,45 @@ public class NodeImpl implements Node, RaftServerService {
             .setProducerType(ProducerType.MULTI) //
             .setWaitStrategy(new BlockingWaitStrategy()) //
             .build();
+        //设置事件处理器
         this.applyDisruptor.handleEventsWith(new LogEntryAndClosureHandler());
+        //设置异常处理器
         this.applyDisruptor.setDefaultExceptionHandler(new LogExceptionHandler<Object>(getClass().getSimpleName()));
+        //启动disruptor的线程
         this.applyQueue = this.applyDisruptor.start();
+        //如果开启了metrics统计
         if (this.metrics.getMetricRegistry() != null) {
             this.metrics.getMetricRegistry().register("jraft-node-impl-disruptor",
                 new DisruptorMetricSet(this.applyQueue));
         }
-
+        //fsmCaller封装对业务 StateMachine 的状态转换的调用以及日志的写入等
         this.fsmCaller = new FSMCallerImpl();
+        //初始化日志存储功能
         if (!initLogStorage()) {
             LOG.error("Node {} initLogStorage failed.", getNodeId());
             return false;
         }
+        //初始化元数据存储功能
         if (!initMetaStorage()) {
             LOG.error("Node {} initMetaStorage failed.", getNodeId());
             return false;
         }
+        //对FSMCaller初始化
         if (!initFSMCaller(new LogId(0, 0))) {
             LOG.error("Node {} initFSMCaller failed.", getNodeId());
             return false;
         }
+        //实例化投票箱
         this.ballotBox = new BallotBox();
         final BallotBoxOptions ballotBoxOpts = new BallotBoxOptions();
         ballotBoxOpts.setWaiter(this.fsmCaller);
         ballotBoxOpts.setClosureQueue(this.closureQueue);
+        //初始化ballotBox的属性
         if (!this.ballotBox.init(ballotBoxOpts)) {
             LOG.error("Node {} init ballotBox failed.", getNodeId());
             return false;
         }
-
+        //初始化快照存储功能
         if (!initSnapshotStorage()) {
             LOG.error("Node {} initSnapshotStorage failed.", getNodeId());
             return false;
@@ -797,6 +836,7 @@ public class NodeImpl implements Node, RaftServerService {
         this.conf = new ConfigurationEntry();
         this.conf.setId(new LogId());
         // if have log using conf in log, else using conf in options
+        //校验日志文件索引的一致性
         if (this.logManager.getLastLogIndex() > 0) {
             this.conf = this.logManager.checkAndSetConfiguration(this.conf);
         } else {
@@ -805,6 +845,8 @@ public class NodeImpl implements Node, RaftServerService {
 
         // TODO RPC service and ReplicatorGroup is in cycle dependent, refactor it
         this.replicatorGroup = new ReplicatorGroupImpl();
+
+        //收其他节点或者客户端发过来的请求，转交给对应服务处理
         this.rpcService = new BoltRaftClientService(this.replicatorGroup);
         final ReplicatorGroupOptions rgOpts = new ReplicatorGroupOptions();
         rgOpts.setHeartbeatTimeoutMs(heartbeatTimeout(this.options.getElectionTimeoutMs()));
@@ -820,6 +862,7 @@ public class NodeImpl implements Node, RaftServerService {
         // Adds metric registry to RPC service.
         this.options.setMetricRegistry(this.metrics.getMetricRegistry());
 
+        //初始化rpc服务
         if (!this.rpcService.init(this.options)) {
             LOG.error("Fail to init rpc service.");
             return false;
@@ -845,12 +888,14 @@ public class NodeImpl implements Node, RaftServerService {
                 this.logManager.getLastLogId(false), this.conf.getConf(), this.conf.getOldConf());
         }
 
+        //如果快照执行器不为空，并且生成快照的时间间隔大于0，那么就定时生成快照
         if (this.snapshotExecutor != null && this.options.getSnapshotIntervalSecs() > 0) {
             LOG.debug("Node {} start snapshot timer, term={}.", getNodeId(), this.currTerm);
             this.snapshotTimer.start();
         }
 
         if (!this.conf.isEmpty()) {
+            //新启动的node需要重新选举
             stepDown(this.currTerm, false, new Status());
         }
 
@@ -862,6 +907,7 @@ public class NodeImpl implements Node, RaftServerService {
         // Now the raft node is started , have to acquire the writeLock to avoid race
         // conditions
         this.writeLock.lock();
+        //这个分支表示当前的jraft集群里只有一个节点，那么个节点必定是leader直接进行选举就好了
         if (this.conf.isStable() && this.conf.getConf().size() == 1 && this.conf.getConf().contains(this.serverId)) {
             // The group contains only this server which must be the LEADER, trigger
             // the timer immediately.
@@ -869,7 +915,13 @@ public class NodeImpl implements Node, RaftServerService {
         } else {
             this.writeLock.unlock();
         }
-
+        /**
+         * 这段代码里会将当前的状态设置为Follower，然后启动快照定时器定时生成快照。
+         * 如果当前的集群不是单节点集群需要做一下stepDown，表示新生成的Node节点需要重新进行选举。
+         * 最下面有一个if分支，如果当前的jraft集群里只有一个节点，那么个节点必定是leader直接进行选举就好了，所以会直接调用electSelf进行选举。
+         * 选举的代码我们就暂时略过，要不然后面就没得讲了。
+         * 到这里整个NodeImpl实例的init方法就分析完了
+         */
         return true;
     }
 
