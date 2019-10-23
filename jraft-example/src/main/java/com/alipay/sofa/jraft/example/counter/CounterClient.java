@@ -46,7 +46,7 @@ public class CounterClient {
         }
 
         RouteTable.getInstance().updateConfiguration(groupId, conf);
-
+        //
         final BoltCliClientService cliClientService = new BoltCliClientService();
         cliClientService.init(new CliOptions());
 

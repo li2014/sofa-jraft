@@ -71,7 +71,9 @@ public class IncrementAndGetRequestProcessor extends AsyncUserProcessor<Incremen
             task.setData(ByteBuffer
                 .wrap(SerializerManager.getSerializer(SerializerManager.Hessian2).serialize(request)));
 
+            //调用node处理请求
             // apply task to raft group.
+            LOG.info("task IncrementAndGetRequest delta: "+ request.getDelta());
             counterServer.getNode().apply(task);
         } catch (final CodecException e) {
             LOG.error("Fail to encode IncrementAndGetRequest", e);

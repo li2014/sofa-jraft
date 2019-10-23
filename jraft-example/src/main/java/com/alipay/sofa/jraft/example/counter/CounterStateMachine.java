@@ -41,6 +41,12 @@ import com.alipay.sofa.jraft.util.Utils;
 /**
  * Counter state machine.
  *
+ * CounterStateMachine状态机，并设值了日志，元信息和快照的存储路径。
+ * CounterStateMachine实现了StateMachineAdapter抽象类，并重写了3个方法：
+ * onApply用来处理具体的业务
+ * onSnapshotSave保存快照
+ * onSnapshotLoad加载快照
+ * 在保存和加载快照的地方使用了CounterSnapshotFile类来进行辅助
  * @author boyan (boyan@alibaba-inc.com)
  *
  * 2018-Apr-09 4:52:31 PM
@@ -71,9 +77,11 @@ public class CounterStateMachine extends StateMachineAdapter {
 
     @Override
     public void onApply(final Iterator iter) {
+        //获取processor中封装的数据
         while (iter.hasNext()) {
             long delta = 0;
 
+            //用于封装请求数据和回调结果
             IncrementAndAddClosure closure = null;
             if (iter.done() != null) {
                 // This task is applied by this node, get value from closure to avoid additional parsing.
@@ -90,8 +98,11 @@ public class CounterStateMachine extends StateMachineAdapter {
                     LOG.error("Fail to decode IncrementAndGetRequest", e);
                 }
             }
+            //获取当前值
             final long prev = this.value.get();
+            //将当前值加上delta
             final long updated = value.addAndGet(delta);
+            //设置响应，并调用run方法回写响应方法
             if (closure != null) {
                 closure.getResponse().setValue(updated);
                 closure.getResponse().setSuccess(true);

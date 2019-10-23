@@ -54,8 +54,8 @@ public class CounterServer {
         final RpcServer rpcServer = new RpcServer(serverId.getPort());
         RaftRpcServerFactory.addRaftRequestProcessors(rpcServer);
         // 注册业务处理器
-        rpcServer.registerUserProcessor(new GetValueRequestProcessor(this));
-        rpcServer.registerUserProcessor(new IncrementAndGetRequestProcessor(this));
+        rpcServer.registerUserProcessor(new GetValueRequestProcessor(this)); //用来提供读服务，读取当前 Cn 值
+        rpcServer.registerUserProcessor(new IncrementAndGetRequestProcessor(this));  //提供写服务，写入 delta 触发计数器运算
         // 初始化状态机
         this.fsm = new CounterStateMachine();
         // 设置状态机到启动参数
