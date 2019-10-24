@@ -40,7 +40,9 @@ public abstract class RepeatedTimer implements Describer {
     public static final Logger LOG  = LoggerFactory.getLogger(RepeatedTimer.class);
 
     private final Lock         lock = new ReentrantLock();
+    //timer是HashedWheelTimer
     private final Timer        timer;
+    //实例是HashedWheelTimeout
     private Timeout            timeout;
     private boolean            stopped;
     private volatile boolean   running;
@@ -53,7 +55,9 @@ public abstract class RepeatedTimer implements Describer {
         return this.timeoutMs;
     }
 
+    //name代表RepeatedTimer实例的种类，timeoutMs是超时时间
     public RepeatedTimer(String name, int timeoutMs) {
+        //其实JRaft的定时任务调度器是基于Netty的时间轮来做的，如果没有看过Netty的源码，很可能并不知道时间轮算法，也就很难想到要去使用这么优秀的定时调度算法了。
         this(name, timeoutMs, new HashedWheelTimer(new NamedThreadFactory(name, true), 1, TimeUnit.MILLISECONDS, 2048));
     }
 
@@ -80,14 +84,21 @@ public abstract class RepeatedTimer implements Describer {
         return timeoutMs;
     }
 
+    /**
+     * 这个run方法会由timer进行回调，如果没有调用stop或destroy方法的话，那么调用完onTrigger方法后会继续调用schedule，然后一次次循环调用RepeatedTimer的run方法。
+     * 如果调用了destroy方法，在这里会有一个onDestroy的方法，可以由实现类override复写执行一个钩子。
+     */
     public void run() {
+        //加锁，只能一个线程调用这个方法
         this.lock.lock();
         try {
+            //表示RepeatedTimer已经被调用过
             this.invoking = true;
         } finally {
             this.lock.unlock();
         }
         try {
+            //然后会调用RepeatedTimer实例实现的方法
             onTrigger();
         } catch (final Throwable t) {
             LOG.error("Run timer failed.", t);
@@ -96,6 +107,7 @@ public abstract class RepeatedTimer implements Describer {
         this.lock.lock();
         try {
             this.invoking = false;
+            //如果调用了stop方法，那么将不会继续调用schedule方法
             if (this.stopped) {
                 this.running = false;
                 invokeDestroyed = this.destroyed;
@@ -137,19 +149,25 @@ public abstract class RepeatedTimer implements Describer {
      * Start the timer.
      */
     public void start() {
+        //加锁，只能一个线程调用这个方法
         this.lock.lock();
         try {
+            //destroyed默认是false
             if (this.destroyed) {
                 return;
             }
+            //stopped在构造器中初始化为ture
             if (!this.stopped) {
                 return;
             }
+            //启动完一次后下次就无法再次往下继续
             this.stopped = false;
             if (this.running) {
                 return;
             }
+            //running默认为false
             this.running = true;
+            //从上面的赋值以及加锁的情况来看，这个是只能被调用一次的。然后会调用到schedule方法中
             schedule();
         } finally {
             this.lock.unlock();
@@ -160,6 +178,7 @@ public abstract class RepeatedTimer implements Describer {
         if(this.timeout != null) {
             this.timeout.cancel();
         }
+        /*如果timer调用了TimerTask的run方法，那么便会回调到RepeatedTimer的run方法中：*/
         final TimerTask timerTask = timeout -> {
             try {
                 RepeatedTimer.this.run();
