@@ -35,7 +35,13 @@ public class ConfigurationManager {
 
     private static final Logger                  LOG            = LoggerFactory.getLogger(ConfigurationManager.class);
 
+    /**
+     * ConfigurationEntry 配置也是双向链表
+     */
     private final LinkedList<ConfigurationEntry> configurations = new LinkedList<>();
+    /**
+     * 配置快照
+     */
     private ConfigurationEntry                   snapshot       = new ConfigurationEntry();
 
     /**
@@ -43,6 +49,7 @@ public class ConfigurationManager {
      */
     public boolean add(final ConfigurationEntry entry) {
         if (!this.configurations.isEmpty()) {
+            //发现是旧的日志识别过来的配置,拒绝加入进来
             if (this.configurations.peekLast().getId().getIndex() >= entry.getId().getIndex()) {
                 LOG.error("Did you forget to call truncateSuffix before the last log index goes back.");
                 return false;

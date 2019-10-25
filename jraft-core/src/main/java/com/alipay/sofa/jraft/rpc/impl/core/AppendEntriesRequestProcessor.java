@@ -82,6 +82,8 @@ public class AppendEntriesRequestProcessor extends NodeRequestProcessor<AppendEn
             }
 
             // The node enable pipeline, we should ensure bolt support it.
+            //接收端不采用线程池派发任务，增加判断 _dispatch_msg_list_in_default_executor_
+            // 使得我们可以通过 io 线程直接将任务投递到 Processor 中。
             Utils.ensureBoltPipeline();
 
             final PeerRequestContext ctx = getPeerRequestContext(groupId, peerId, null);

@@ -21,7 +21,7 @@ import java.io.PrintWriter;
 /**
  * Components that implement this interface need to be able to describe
  * their own state and output state information via the {@code describe} method.
- *
+ * 叙述者
  * @author jiachun.fjc
  */
 public interface Describer {

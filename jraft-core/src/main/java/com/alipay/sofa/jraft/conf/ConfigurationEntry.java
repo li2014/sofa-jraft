@@ -30,7 +30,11 @@ import com.alipay.sofa.jraft.entity.PeerId;
  */
 public class ConfigurationEntry {
 
+    /**
+     * 日志id识别码
+     */
     private LogId         id      = new LogId(0, 0);
+
     private Configuration conf    = new Configuration();
     private Configuration oldConf = new Configuration();
 

@@ -131,6 +131,8 @@ public class JRaftRpcAddressParser extends RpcAddressParser {
         Requires.requireNonNull(port, "port is null");
         // isolated the bolt connection pool
         // uniqueKey = ip:port:jraft
+        /*在 Replicator 端，通过 uniqueKey 对日志传输所用的 Url 进行特殊标识 ，这样 SOFABolt (SOFAJRaft 底层所采用的通信框架)
+        就会为这种 Url 建立单一的连接，也就是发送端的 Connection Pool 中只有一条可用连接。*/
         final String uniqueKey = ip + RemotingAddressParser.COLON + port + RemotingAddressParser.COLON + "jraft";
         parsedUrl = new Url(url, ip, Integer.parseInt(port), uniqueKey, properties);
         initUrlArgs(parsedUrl);

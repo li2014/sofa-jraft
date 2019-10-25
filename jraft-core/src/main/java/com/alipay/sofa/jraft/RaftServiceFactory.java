@@ -44,6 +44,7 @@ public final class RaftServiceFactory {
      */
     public static Node createAndInitRaftNode(final String groupId, final PeerId serverId, final NodeOptions opts) {
         final Node ret = createRaftNode(groupId, serverId);
+        //为node节点初始化 主要的配置都是在init方法中完成的。
         if (!ret.init(opts)) {
             throw new IllegalStateException("Fail to init node, please see the logs to find the reason.");
         }
