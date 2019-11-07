@@ -20,6 +20,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 
+import com.alipay.sofa.jraft.Status;
 import org.junit.Before;
 import org.junit.Test;
 
@@ -43,6 +44,19 @@ public class ClosureQueueTest {
                 latch.countDown();
             }
         };
+    }
+    /*
+       函数式编程
+     */
+    private Closure test(int aaa){
+        return  status -> { System.out.println("add="+aaa+"status:"+status.getCode()+" msg:"+status.getErrorMsg());};
+    }
+
+
+    @Test
+    public void testClosure(){
+        test( 2222).run(new Status(1,"合理"));
+
     }
 
     @Test

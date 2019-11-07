@@ -122,6 +122,7 @@ public class IteratorImpl {
         if (this.currentIndex < this.firstClosureIndex) {
             return null;
         }
+        //取出需要处理的同步的日志
         return this.closures.get((int) (this.currentIndex - this.firstClosureIndex));
     }
 

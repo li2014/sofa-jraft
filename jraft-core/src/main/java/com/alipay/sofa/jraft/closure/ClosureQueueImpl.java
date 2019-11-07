@@ -43,7 +43,14 @@ public class ClosureQueueImpl implements ClosureQueue {
     private static final Logger LOG = LoggerFactory.getLogger(ClosureQueueImpl.class);
 
     private final Lock          lock;
+
+    /**
+     * 队列头
+     */
     private long                firstIndex;
+    /**
+     * 双向链表队列先进后出
+     */
     private LinkedList<Closure> queue;
 
     @OnlyForTest
@@ -63,6 +70,9 @@ public class ClosureQueueImpl implements ClosureQueue {
         this.queue = new LinkedList<>();
     }
 
+    /**
+     * 清空不是丢弃，而是取出所有都执行
+     */
     @Override
     public void clear() {
         List<Closure> savedQueue;
@@ -78,6 +88,7 @@ public class ClosureQueueImpl implements ClosureQueue {
         final Status status = new Status(RaftError.EPERM, "Leader stepped down");
         for (final Closure done : savedQueue) {
             if (done != null) {
+                //线程中执行 Permission issue leader总统下台了
                 Utils.runClosureInThread(done, status);
             }
         }
@@ -98,6 +109,7 @@ public class ClosureQueueImpl implements ClosureQueue {
     public void appendPendingClosure(final Closure closure) {
         this.lock.lock();
         try {
+            //在链表尾部添加一个元素
             this.queue.add(closure);
         } finally {
             this.lock.unlock();
@@ -128,6 +140,7 @@ public class ClosureQueueImpl implements ClosureQueue {
             }
             final long outFirstIndex = this.firstIndex;
             for (long i = outFirstIndex; i <= endIndex; i++) {
+                //移除队列头第一元素
                 final Closure closure = this.queue.pollFirst();
                 if (taskClosures != null && closure instanceof TaskClosure) {
                     taskClosures.add((TaskClosure) closure);

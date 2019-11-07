@@ -130,6 +130,9 @@ public class FSMCallerImpl implements FSMCaller {
         }
     }
 
+    /*
+    本地消息队列事件
+     */
     private static class ApplyTaskFactory implements EventFactory<ApplyTask> {
 
         @Override
@@ -138,12 +141,16 @@ public class FSMCallerImpl implements FSMCaller {
         }
     }
 
+    /**
+     * 本地消息队列处理器
+     */
     private class ApplyTaskHandler implements EventHandler<ApplyTask> {
         // max committed index in current batch, reset to -1 every batch
         private long maxCommittedIndex = -1;
 
         @Override
         public void onEvent(final ApplyTask event, final long sequence, final boolean endOfBatch) throws Exception {
+            //处理提交
             this.maxCommittedIndex = runApplyTask(event, this.maxCommittedIndex, endOfBatch);
         }
     }
@@ -159,7 +166,7 @@ public class FSMCallerImpl implements FSMCaller {
     private final AtomicLong                                        applyingIndex;
     private volatile RaftException                                  error;
     private Disruptor<ApplyTask>                                    disruptor;
-    private RingBuffer<ApplyTask>                                   taskQueue;
+    private RingBuffer<ApplyTask>                                   taskQueue;//Disruptor 内存无锁队列，高并发高性能
     private volatile CountDownLatch                                 shutdownLatch;
     private NodeMetrics                                             nodeMetrics;
     private final CopyOnWriteArrayList<LastAppliedLogIndexListener> lastAppliedLogIndexListeners = new CopyOnWriteArrayList<>();
@@ -189,6 +196,7 @@ public class FSMCallerImpl implements FSMCaller {
             .setProducerType(ProducerType.MULTI) //
             .setWaitStrategy(new BlockingWaitStrategy()) //
             .build();
+        //处理事件
         this.disruptor.handleEventsWith(new ApplyTaskHandler());
         this.disruptor.setDefaultExceptionHandler(new LogExceptionHandler<Object>(getClass().getSimpleName()));
         this.taskQueue = this.disruptor.start();
@@ -225,6 +233,11 @@ public class FSMCallerImpl implements FSMCaller {
         this.lastAppliedLogIndexListeners.add(listener);
     }
 
+    /**
+     * 向本地任务队列发送消息
+     * @param tpl
+     * @return
+     */
     private boolean enqueueTask(final EventTranslator<ApplyTask> tpl) {
         if (this.shutdownLatch != null) {
             // Shutting down
@@ -358,6 +371,13 @@ public class FSMCallerImpl implements FSMCaller {
         }
     }
 
+    /**
+     * 状态分发事件处理
+     * @param task
+     * @param maxCommittedIndex
+     * @param endOfBatch
+     * @return
+     */
     @SuppressWarnings("ConstantConditions")
     private long runApplyTask(final ApplyTask task, long maxCommittedIndex, final boolean endOfBatch) {
         CountDownLatch shutdown = null;
@@ -422,6 +442,7 @@ public class FSMCallerImpl implements FSMCaller {
                         break;
                 }
             } finally {
+                //记录状态
                 this.nodeMetrics.recordLatency(task.type.metricName(), Utils.monotonicMs() - startMs);
             }
         }
@@ -459,6 +480,10 @@ public class FSMCallerImpl implements FSMCaller {
         }
     }
 
+    /**
+     * 处理提交序列
+     * @param committedIndex
+     */
     private void doCommitted(final long committedIndex) {
         if (!this.error.getStatus().isOk()) {
             return;
@@ -472,14 +497,17 @@ public class FSMCallerImpl implements FSMCaller {
         try {
             final List<Closure> closures = new ArrayList<>();
             final List<TaskClosure> taskClosures = new ArrayList<>();
+            //选择队列中的任务用于执行
             final long firstClosureIndex = this.closureQueue.popClosureUntil(committedIndex, closures, taskClosures);
 
             // Calls TaskClosure#onCommitted if necessary
             onTaskCommitted(taskClosures);
 
             Requires.requireTrue(firstClosureIndex >= 0, "Invalid firstClosureIndex");
+            //处理同步日志,按照规则迭代取值
             final IteratorImpl iterImpl = new IteratorImpl(this.fsm, this.logManager, closures, firstClosureIndex,
                 lastAppliedIndex, committedIndex, this.applyingIndex);
+            //
             while (iterImpl.isGood()) {
                 final LogEntry logEntry = iterImpl.entry();
                 if (logEntry.getType() != EnumOutter.EntryType.ENTRY_TYPE_DATA) {
@@ -493,6 +521,7 @@ public class FSMCallerImpl implements FSMCaller {
                         // For other entries, we have nothing to do besides flush the
                         // pending tasks and run this closure to notify the caller that the
                         // entries before this one were successfully committed and applied.
+                        //同步日志
                         iterImpl.done().run(Status.OK());
                     }
                     iterImpl.next();
